@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ethereum Contract Refund</title>
+    <style>
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+body {
+    background-color: #f5f5f5;
+    color: #333;
+    line-height: 1.6;
+}
+
+.container {
+    max-width: 800px;
+    margin: 40px auto;
+    padding: 20px;
+}
+
+h1 {
+    text-align: center;
+    margin-bottom: 30px;
+    color: #1a1a1a;
+}
+
+h2 {
+    margin-bottom: 20px;
+    color: #2c3e50;
+}
+
+.card {
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    padding: 30px;
+    margin-bottom: 20px;
+}
+
+button {
+    background-color: #3498db;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 16px;
+    transition: background-color 0.3s;
+    margin: 15px 0;
+}
+
+button:hover {
+    background-color: #2980b9;
+}
+
+button:disabled {
+    background-color: #95a5a6;
+    cursor: not-allowed;
+}
+
+.input-group {
+    margin-bottom: 15px;
+}
+
+label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 600;
+}
+
+input {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 16px;
+}
+
+#account-display, #connection-status, #transaction-status {
+    margin: 10px 0;
+    padding: 10px;
+    border-radius: 4px;
+}
+
+#account-display {
+    background-color: #f8f9fa;
+    word-break: break-all;
+}
+
+#connection-status.success {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+#connection-status.error {
+    background-color: #f8d7da;
+    color: #721c24;
+}
+
+#transaction-status.pending {
+    background-color: #fff3cd;
+    color: #856404;
+}
+
+#transaction-status.success {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+#transaction-status.error {
+    background-color: #f8d7da;
+    color: #721c24;
+}
+
+.hidden {
+    display: none;
+}
+
+/* Style for the help text */
+.help-text {
+    font-size: 14px;
+    color: #666;
+    margin-top: -10px;
+    margin-bottom: 15px;
+    font-style: italic;
+}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Ethereum Contract Refund Portal</h1>
+
+        <div class="card">
+            <div id="connect-section">
+                <p>Connect your MetaMask wallet to interact with the contract.</p>
+                <button id="connect-button">Connect MetaMask</button>
+                <p id="account-display"></p>
+                <p id="connection-status"></p>
+            </div>
+
+            <div id="refund-section" class="hidden">
+                <h2>Call Refund Function</h2>
+
+                <div class="input-group">
+                    <label for="contract-address">Contract Address:</label>
+                    <input type="text" id="contract-address" placeholder="Enter contract address (0x...)" value="0xdaF86076b20b030bA828772AF050320aF2DaB15a">
+                    <p class="help-text">The address of the smart contract containing the refund function</p>
+                </div>
+
+                <div class="input-group">
+                    <label for="refund-param">Contract ID (bytes32 oraclizeQueryId):</label>
+                    <input type="text" id="refund-param" placeholder="Enter contract ID">
+                    <p class="help-text">Example: 305E38F6B83442114BB9FD7F0B83205D8AB45CBD8690C8F290DA707655B8350E</p>
+                </div>
+
+                <button id="refund-button">Execute Refund</button>
+                <div id="transaction-status"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Load ethers.js from CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"
+            type="application/javascript"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // DOM Elements
+            const connectButton = document.getElementById('connect-button');
+            const accountDisplay = document.getElementById('account-display');
+            const connectionStatus = document.getElementById('connection-status');
+            const refundSection = document.getElementById('refund-section');
+            const contractAddressInput = document.getElementById('contract-address');
+            const refundParam = document.getElementById('refund-param');
+            const refundButton = document.getElementById('refund-button');
+            const transactionStatus = document.getElementById('transaction-status');
+
+            // Contract ABI for the refund function
+            const contractABI = [
+                {
+                    "inputs": [
+                        {
+                            "internalType": "bytes32",
+                            "name": "_contractId", // or oraclizeQueryId
+                            "type": "bytes32"
+                        }
+                    ],
+                    "name": "refund",
+                    "outputs": [
+                        {
+                            "internalType": "bool",
+                            "name": "",
+                            "type": "bool"
+                        }
+                    ],
+                    "stateMutability": "nonpayable",
+                    "type": "function"
+                }
+            ];
+
+            // Variables
+            let provider;
+            let signer;
+            let userAccount;
+
+            // Initialize ethers provider
+            async function initProvider() {
+                // Check if ethereum object exists (MetaMask is installed)
+                if (typeof window.ethereum !== 'undefined') {
+                    try {
+                        // Request account access
+                        const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                        userAccount = accounts[0];
+                        accountDisplay.textContent = `Connected Account: ${userAccount}`;
+
+                        // Create ethers provider and signer
+                        provider = new ethers.providers.Web3Provider(window.ethereum);
+                        signer = provider.getSigner();
+
+                        // Show success message
+                        connectionStatus.textContent = 'Successfully connected to MetaMask!';
+                        connectionStatus.className = 'success';
+
+                        // Show refund section
+                        refundSection.classList.remove('hidden');
+
+                        // Setup event listeners for network or account changes
+                        setupEventListeners();
+
+                        return true;
+                    } catch (error) {
+                        connectionStatus.textContent = `Error connecting to MetaMask: ${error.message}`;
+                        connectionStatus.className = 'error';
+                        console.error(error);
+                        return false;
+                    }
+                } else {
+                    connectionStatus.textContent = 'MetaMask is not installed. Please install MetaMask to use this application.';
+                    connectionStatus.className = 'error';
+                    return false;
+                }
+            }
+
+            // Setup event listeners for MetaMask
+            function setupEventListeners() {
+                // Listen for account changes
+                window.ethereum.on('accountsChanged', (accounts) => {
+                    window.location.reload();
+                });
+
+                // Listen for chain changes
+                window.ethereum.on('chainChanged', () => {
+                    window.location.reload();
+                });
+            }
+
+            // Call refund function on the contract
+            async function callRefundFunction(contractAddress, contractId) {
+                if (!signer) {
+                    transactionStatus.textContent = 'Wallet not connected. Please connect to MetaMask first.';
+                    transactionStatus.className = 'error';
+                    return;
+                }
+
+                try {
+                    transactionStatus.textContent = 'Preparing transaction...';
+                    transactionStatus.className = 'pending';
+
+                    // Validate contract address
+                    if (!ethers.utils.isAddress(contractAddress)) {
+                        transactionStatus.textContent = 'Invalid contract address. Please enter a valid Ethereum address.';
+                        transactionStatus.className = 'error';
+                        return;
+                    }
+
+                    // Format the contractId to ensure it has the 0x prefix for bytes32
+                    let formattedContractId = contractId.trim();
+
+                    // Add 0x prefix if it's missing
+                    if (!formattedContractId.startsWith('0x')) {
+                        formattedContractId = '0x' + formattedContractId;
+                    }
+
+                    // Create contract instance with the provided address
+                    const contract = new ethers.Contract(contractAddress, contractABI, signer);
+
+                    transactionStatus.textContent = 'Transaction pending...';
+
+                    // Call the refund function with the bytes32 contractId parameter
+                    const tx = await contract.refund(formattedContractId);
+
+                    transactionStatus.textContent = `Transaction submitted. Hash: ${tx.hash}`;
+
+                    // Wait for transaction to be mined
+                    await tx.wait();
+
+                    transactionStatus.textContent = `Transaction confirmed! Hash: ${tx.hash}`;
+                    transactionStatus.className = 'success';
+                } catch (error) {
+                    transactionStatus.textContent = `Error: ${error.message}`;
+                    transactionStatus.className = 'error';
+                    console.error(error);
+                }
+            }
+
+            // Event Listeners
+            connectButton.addEventListener('click', async () => {
+                connectButton.disabled = true;
+                const success = await initProvider();
+                if (!success) {
+                    connectButton.disabled = false;
+                }
+            });
+
+            refundButton.addEventListener('click', async () => {
+                const contractAddress = contractAddressInput.value;
+                const contractId = refundParam.value;
+
+                if (contractAddress.trim() === '') {
+                    transactionStatus.textContent = 'Please enter a contract address.';
+                    transactionStatus.className = 'error';
+                    return;
+                }
+
+                if (contractId.trim() === '') {
+                    transactionStatus.textContent = 'Please enter a contract ID (bytes32 value).';
+                    transactionStatus.className = 'error';
+                    return;
+                }
+
+                refundButton.disabled = true;
+                await callRefundFunction(contractAddress, contractId);
+                refundButton.disabled = false;
+            });
+        });
+    </script>
+</body>
+</html>
