@@ -15,7 +15,7 @@ Visit the refund portal at:
 
 ### 3. Find the Contract Address
 - Open [Etherscan](https://etherscan.io/).
-- Look for a transaction where a **new contract** interacted with R-squared.
+- Look for a transaction where a **new contract** was created when you bridged your eth.
 - Copy the contract address from that transaction.
 - Paste it into the **"Contract Address"** field in the portal.
 
