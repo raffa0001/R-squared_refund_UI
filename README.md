@@ -1,4 +1,4 @@
-![immagine](https://github.com/user-attachments/assets/6e917efe-89d6-4596-8af9-72f21be96ca0)# Ethereum Contract Refund Portal
+# Ethereum Contract Refund Portal
 
 This portal allows users to request refunds from an Ethereum smart contract. Follow the steps below to complete the process.
 
