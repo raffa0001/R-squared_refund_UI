@@ -1,4 +1,4 @@
-# Ethereum Contract Refund Portal
+![immagine](https://github.com/user-attachments/assets/6e917efe-89d6-4596-8af9-72f21be96ca0)# Ethereum Contract Refund Portal
 
 This portal allows users to request refunds from an Ethereum smart contract. Follow the steps below to complete the process.
 
@@ -20,6 +20,8 @@ Visit the refund portal at:
 - Paste it into the **"Contract Address"** field in the portal.
 
 ![immagine](https://github.com/user-attachments/assets/30295501-8b50-41ec-971e-eeeeff906fe1)
+![immagine](https://github.com/user-attachments/assets/3618ff43-8ba1-4af6-accc-197f70f56372)
+
 
 ### 4. Find the Contract ID (bytes32 oraclizeQueryId)
 - Open the same transaction on **Etherscan**.
