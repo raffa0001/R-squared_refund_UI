@@ -19,11 +19,17 @@ Visit the refund portal at:
 - Copy the contract address from that transaction.
 - Paste it into the **"Contract Address"** field in the portal.
 
+![immagine](https://github.com/user-attachments/assets/30295501-8b50-41ec-971e-eeeeff906fe1)
+
 ### 4. Find the Contract ID (bytes32 oraclizeQueryId)
 - Open the same transaction on **Etherscan**.
 - Go to the **Logs** tab.
 - Under **Topics 1**, find the `contractId` (bytes32 value).
 - Copy and paste it into the **"Contract ID"** field in the portal.
+
+![immagine](https://github.com/user-attachments/assets/6b26cb50-ea62-484a-9be6-087f043cfd7d)
+![immagine](https://github.com/user-attachments/assets/2a790313-5756-46f6-bd4b-4dd2f25a1bd3)
+
 
 ### 5. Execute the Refund
 - Double-check the entered details.
