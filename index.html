@@ -74,7 +74,7 @@ label {
     font-weight: 600;
 }
 
-input {
+input, select {
     width: 100%;
     padding: 10px;
     border: 1px solid #ddd;
@@ -82,7 +82,7 @@ input {
     font-size: 16px;
 }
 
-#account-display, #connection-status, #transaction-status {
+#account-display, #connection-status, #transaction-status, #network-display {
     margin: 10px 0;
     padding: 10px;
     border-radius: 4px;
@@ -101,6 +101,11 @@ input {
 #connection-status.error {
     background-color: #f8d7da;
     color: #721c24;
+}
+
+#network-display {
+    background-color: #e2e3f1;
+    color: #383d7a;
 }
 
 #transaction-status.pending {
@@ -122,13 +127,43 @@ input {
     display: none;
 }
 
-/* Style for the help text */
 .help-text {
     font-size: 14px;
     color: #666;
     margin-top: -10px;
     margin-bottom: 15px;
     font-style: italic;
+}
+
+.error-detail {
+    font-size: 13px;
+    color: #856404;
+    background-color: #fff3cd;
+    border: 1px solid #ffc107;
+    border-radius: 4px;
+    padding: 10px;
+    margin-top: 10px;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.checklist {
+    font-size: 13px;
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    padding: 12px;
+    margin-top: 10px;
+}
+
+.checklist h4 {
+    margin-bottom: 8px;
+    color: #495057;
+}
+
+.checklist li {
+    margin-left: 20px;
+    margin-bottom: 4px;
 }
     </style>
 </head>
@@ -141,6 +176,7 @@ input {
                 <p>Connect your MetaMask wallet to interact with the contract.</p>
                 <button id="connect-button">Connect MetaMask</button>
                 <p id="account-display"></p>
+                <p id="network-display" class="hidden"></p>
                 <p id="connection-status"></p>
             </div>
 
@@ -154,9 +190,21 @@ input {
                 </div>
 
                 <div class="input-group">
-                    <label for="refund-param">Contract ID (bytes32 oraclizeQueryId):</label>
+                    <label for="refund-param">Contract ID (bytes32 / oraclizeQueryId):</label>
                     <input type="text" id="refund-param" placeholder="Enter contract ID">
                     <p class="help-text">Example: 305E38F6B83442114BB9FD7F0B83205D8AB45CBD8690C8F290DA707655B8350E</p>
+                </div>
+
+                <div class="input-group">
+                    <label for="gas-price">Gas Price (Gwei) — leave blank for auto:</label>
+                    <input type="text" id="gas-price" placeholder="e.g. 10">
+                    <p class="help-text">Gas price in Gwei (1 Gwei = 0.000000001 ETH). If estimation fails, this price is used with a 300,000 gas limit.</p>
+                </div>
+
+                <div class="input-group">
+                    <label for="tx-value">Value to send (ETH) — optional, most refunds don't need this:</label>
+                    <input type="text" id="tx-value" placeholder="e.g. 0.01">
+                    <p class="help-text">Only fill this in if the refund contract requires sending ETH. Most refund functions are nonpayable.</p>
                 </div>
 
                 <button id="refund-button">Execute Refund</button>
@@ -165,28 +213,64 @@ input {
         </div>
     </div>
 
-    <!-- Load ethers.js from CDN -->
     <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"
             type="application/javascript"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            // DOM Elements
             const connectButton = document.getElementById('connect-button');
             const accountDisplay = document.getElementById('account-display');
+            const networkDisplay = document.getElementById('network-display');
             const connectionStatus = document.getElementById('connection-status');
             const refundSection = document.getElementById('refund-section');
             const contractAddressInput = document.getElementById('contract-address');
             const refundParam = document.getElementById('refund-param');
+            const gasPriceInput = document.getElementById('gas-price');
+            const txValueInput = document.getElementById('tx-value');
             const refundButton = document.getElementById('refund-button');
             const transactionStatus = document.getElementById('transaction-status');
 
-            // Contract ABI for the refund function
+            const CHAIN_NAMES = {
+                1: 'Ethereum Mainnet',
+                5: 'Goerli',
+                11155111: 'Sepolia',
+                137: 'Polygon Mainnet',
+                80001: 'Mumbai',
+                56: 'BSC Mainnet',
+                97: 'BSC Testnet',
+                43114: 'Avalanche C-Chain',
+                42161: 'Arbitrum One',
+                10: 'Optimism',
+                250: 'Fantom',
+                25: 'Cronos',
+                324: 'zkSync Era',
+                8453: 'Base',
+                59144: 'Linea',
+                42220: 'Celo',
+                1284: 'Moonbeam',
+                1285: 'Moonriver',
+                1088: 'Metis',
+                7700: 'Canto',
+                5000: 'Mantle',
+                204: 'opBNB',
+                534352: 'Scroll',
+                100: 'Gnosis',
+                42262: 'Emerald',
+                1666600000: 'Harmony',
+                205: 'Aurora',
+                1313161554: 'Aurora',
+                288: 'Boba',
+                42170: 'Arbitrum Nova',
+                40: 'Telos',
+                1030: 'Conflux',
+                888: 'Wanchain'
+            };
+
             const contractABI = [
                 {
                     "inputs": [
                         {
                             "internalType": "bytes32",
-                            "name": "_contractId", // or oraclizeQueryId
+                            "name": "_contractId",
                             "type": "bytes32"
                         }
                     ],
@@ -203,33 +287,32 @@ input {
                 }
             ];
 
-            // Variables
             let provider;
             let signer;
             let userAccount;
 
-            // Initialize ethers provider
+            function getChainName(chainId) {
+                return CHAIN_NAMES[chainId] || `Unknown Chain (${chainId})`;
+            }
+
             async function initProvider() {
-                // Check if ethereum object exists (MetaMask is installed)
                 if (typeof window.ethereum !== 'undefined') {
                     try {
-                        // Request account access
                         const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
                         userAccount = accounts[0];
                         accountDisplay.textContent = `Connected Account: ${userAccount}`;
 
-                        // Create ethers provider and signer
                         provider = new ethers.providers.Web3Provider(window.ethereum);
                         signer = provider.getSigner();
 
-                        // Show success message
+                        const network = await provider.getNetwork();
+                        networkDisplay.textContent = `Network: ${getChainName(network.chainId)} (Chain ID: ${network.chainId})`;
+                        networkDisplay.className = '';
+
                         connectionStatus.textContent = 'Successfully connected to MetaMask!';
                         connectionStatus.className = 'success';
 
-                        // Show refund section
                         refundSection.classList.remove('hidden');
-
-                        // Setup event listeners for network or account changes
                         setupEventListeners();
 
                         return true;
@@ -246,21 +329,32 @@ input {
                 }
             }
 
-            // Setup event listeners for MetaMask
             function setupEventListeners() {
-                // Listen for account changes
                 window.ethereum.on('accountsChanged', (accounts) => {
                     window.location.reload();
                 });
 
-                // Listen for chain changes
                 window.ethereum.on('chainChanged', () => {
                     window.location.reload();
                 });
             }
 
-            // Call refund function on the contract
-            async function callRefundFunction(contractAddress, contractId) {
+            function getRevertReason(error) {
+                if (error.reason) return error.reason;
+                if (error.error && error.error.message) return error.error.message;
+                if (error.data && error.data.message) return error.data.message;
+                if (typeof error === 'string') return error;
+
+                try {
+                    const json = JSON.stringify(error);
+                    const reasonMatch = json.match(/reason["']?\s*:\s*["']([^"']+)["']/);
+                    if (reasonMatch) return reasonMatch[1];
+                } catch (e) {}
+
+                return error.message || 'Unknown error';
+            }
+
+            async function callRefundFunction(contractAddress, contractId, gasPriceGwei, valueEth) {
                 if (!signer) {
                     transactionStatus.textContent = 'Wallet not connected. Please connect to MetaMask first.';
                     transactionStatus.className = 'error';
@@ -271,44 +365,102 @@ input {
                     transactionStatus.textContent = 'Preparing transaction...';
                     transactionStatus.className = 'pending';
 
-                    // Validate contract address
                     if (!ethers.utils.isAddress(contractAddress)) {
                         transactionStatus.textContent = 'Invalid contract address. Please enter a valid Ethereum address.';
                         transactionStatus.className = 'error';
                         return;
                     }
 
-                    // Format the contractId to ensure it has the 0x prefix for bytes32
                     let formattedContractId = contractId.trim();
-
-                    // Add 0x prefix if it's missing
                     if (!formattedContractId.startsWith('0x')) {
                         formattedContractId = '0x' + formattedContractId;
                     }
 
-                    // Create contract instance with the provided address
+                    if (!ethers.utils.isHexString(formattedContractId, 32)) {
+                        const msg = `Contract ID must be exactly 32 bytes (64 hex chars). Got ${formattedContractId.length - 2} hex chars.`;
+                        transactionStatus.textContent = msg;
+                        transactionStatus.className = 'error';
+                        return;
+                    }
+
                     const contract = new ethers.Contract(contractAddress, contractABI, signer);
 
-                    transactionStatus.textContent = 'Transaction pending...';
+                    const overrides = {};
+                    if (gasPriceGwei) {
+                        overrides.gasPrice = ethers.utils.parseUnits(gasPriceGwei, 'gwei');
+                        overrides.gasLimit = ethers.BigNumber.from('300000');
+                    }
+                    if (valueEth) {
+                        overrides.value = ethers.utils.parseEther(valueEth);
+                    }
 
-                    // Call the refund function with the bytes32 contractId parameter
-                    const tx = await contract.refund(formattedContractId);
+                    transactionStatus.textContent = 'Sending transaction...';
 
-                    transactionStatus.textContent = `Transaction submitted. Hash: ${tx.hash}`;
+                    let tx;
+                    try {
+                        tx = await contract.refund(formattedContractId, overrides);
+                    } catch (innerError) {
+                        if (innerError.code === 'UNPREDICTABLE_GAS_LIMIT' && !gasPriceGwei) {
+                            const defaultGasPrice = '10';
+                            transactionStatus.textContent = `Gas estimation failed. Retrying with ${defaultGasPrice} Gwei gas price and 300,000 gas limit...`;
+                            transactionStatus.className = 'pending';
 
-                    // Wait for transaction to be mined
+                            const retryOverrides = {
+                                gasPrice: ethers.utils.parseUnits(defaultGasPrice, 'gwei'),
+                                gasLimit: ethers.BigNumber.from('300000')
+                            };
+                            if (valueEth) {
+                                retryOverrides.value = ethers.utils.parseEther(valueEth);
+                            }
+                            tx = await contract.refund(formattedContractId, retryOverrides);
+                        } else {
+                            throw innerError;
+                        }
+                    }
+
+                    let gasMsg = '';
+                    if (gasPriceGwei) {
+                        const estimatedCostWei = ethers.BigNumber.from('300000').mul(ethers.utils.parseUnits(gasPriceGwei, 'gwei'));
+                        const estimatedCostEth = ethers.utils.formatEther(estimatedCostWei);
+                        gasMsg = ` (300K gas \u00d7 ${gasPriceGwei} Gwei = ~${estimatedCostEth} ETH)`;
+                    }
+                    transactionStatus.textContent = `Transaction submitted${gasMsg}! Hash: ${tx.hash}`;
+
                     await tx.wait();
 
+                    const currentGasPrice = gasPriceGwei || 'estimated';
                     transactionStatus.textContent = `Transaction confirmed! Hash: ${tx.hash}`;
                     transactionStatus.className = 'success';
+
                 } catch (error) {
-                    transactionStatus.textContent = `Error: ${error.message}`;
+                    const reason = getRevertReason(error);
+
+                    let helpHtml = '';
+                    if (error.code === 'UNPREDICTABLE_GAS_LIMIT' || reason.includes('reverted')) {
+                        helpHtml = `
+                            <div class="error-detail">
+                                <strong>Revert reason:</strong> ${reason}
+                            </div>
+                            <div class="checklist">
+                                <h4>Common causes of "execution reverted":</h4>
+                                <ol>
+                                    <li><strong>Wrong wallet:</strong> The refund function likely requires the SAME wallet that originally deposited funds.</li>
+                                    <li><strong>Wrong Contract ID:</strong> Double-check the bytes32 ID — it must match exactly.</li>
+                                    <li><strong>Already refunded:</strong> This contract ID may have already been refunded.</li>
+                                    <li><strong>Wrong network:</strong> Make sure MetaMask is on the CORRECT network for this contract.</li>
+                                    <li><strong>Contract state:</strong> The refund may not be available yet (e.g., timelock not expired).</li>
+                                </ol>
+                            </div>`;
+                    } else {
+                        helpHtml = `<div class="error-detail">${reason}</div>`;
+                    }
+
+                    transactionStatus.innerHTML = `Error: ${reason}${helpHtml}`;
                     transactionStatus.className = 'error';
                     console.error(error);
                 }
             }
 
-            // Event Listeners
             connectButton.addEventListener('click', async () => {
                 connectButton.disabled = true;
                 const success = await initProvider();
@@ -320,6 +472,8 @@ input {
             refundButton.addEventListener('click', async () => {
                 const contractAddress = contractAddressInput.value;
                 const contractId = refundParam.value;
+                const gasPrice = gasPriceInput.value.trim();
+                const valueEth = txValueInput.value.trim();
 
                 if (contractAddress.trim() === '') {
                     transactionStatus.textContent = 'Please enter a contract address.';
@@ -334,7 +488,7 @@ input {
                 }
 
                 refundButton.disabled = true;
-                await callRefundFunction(contractAddress, contractId);
+                await callRefundFunction(contractAddress, contractId, gasPrice || null, valueEth || null);
                 refundButton.disabled = false;
             });
         });
