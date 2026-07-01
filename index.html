@@ -195,10 +195,21 @@ input, select {
                     <p class="help-text">Example: 305E38F6B83442114BB9FD7F0B83205D8AB45CBD8690C8F290DA707655B8350E</p>
                 </div>
 
-                <div class="input-group">
-                    <label for="gas-price">Gas Price (Gwei) — leave blank for auto:</label>
-                    <input type="text" id="gas-price" placeholder="e.g. 10">
-                    <p class="help-text">Gas price in Gwei (1 Gwei = 0.000000001 ETH). If estimation fails, this price is used with a 300,000 gas limit.</p>
+                <div class="input-group" id="gas-section">
+                    <label>Gas Price:</label>
+                    <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px">
+                        <select id="gas-strategy" style="width:auto;flex-shrink:0">
+                            <option value="standard">Standard</option>
+                            <option value="fast">Fast</option>
+                            <option value="rapid">Rapid</option>
+                            <option value="custom">Custom</option>
+                        </select>
+                        <span id="gas-display" style="font-weight:600;color:#2c3e50">loading...</span>
+                    </div>
+                    <div id="gas-custom-group" class="hidden" style="margin-top:8px">
+                        <input type="text" id="gas-custom" placeholder="Enter Gwei (e.g. 10)">
+                    </div>
+                    <p class="help-text" id="gas-estimate">Auto-fetched from MetaMask's node. No API key needed.</p>
                 </div>
 
                 <button id="refund-button">Execute Refund</button>
@@ -218,7 +229,11 @@ input, select {
             const refundSection = document.getElementById('refund-section');
             const contractAddressInput = document.getElementById('contract-address');
             const refundParam = document.getElementById('refund-param');
-            const gasPriceInput = document.getElementById('gas-price');
+            const gasStrategy = document.getElementById('gas-strategy');
+            const gasDisplay = document.getElementById('gas-display');
+            const gasCustomGroup = document.getElementById('gas-custom-group');
+            const gasCustom = document.getElementById('gas-custom');
+            const gasHelpText = document.getElementById('gas-estimate');
             const refundButton = document.getElementById('refund-button');
             const transactionStatus = document.getElementById('transaction-status');
 
@@ -288,6 +303,55 @@ input, select {
                 return CHAIN_NAMES[chainId] || `Unknown Chain (${chainId})`;
             }
 
+            async function fetchAndDisplayGas() {
+                try {
+                    const feeData = await provider.getFeeData();
+                    const gasPriceGwei = parseFloat(ethers.utils.formatUnits(feeData.gasPrice, 'gwei'));
+                    const standard = gasPriceGwei;
+                    const fast = parseFloat((gasPriceGwei * 1.1).toFixed(3));
+                    const rapid = parseFloat((gasPriceGwei * 1.25).toFixed(3));
+                    const costStandard = (300000 * standard / 1e9).toFixed(6);
+                    const costFast = (300000 * fast / 1e9).toFixed(6);
+                    const costRapid = (300000 * rapid / 1e9).toFixed(6);
+
+                    window._gasPrices = { standard, fast, rapid };
+
+                    const strategy = gasStrategy.value;
+                    const price = window._gasPrices[strategy] || standard;
+                    gasDisplay.textContent = `${price} Gwei`;
+
+                    let eip1559 = '';
+                    if (feeData.maxFeePerGas) {
+                        const maxGwei = parseFloat(ethers.utils.formatUnits(feeData.maxFeePerGas, 'gwei'));
+                        eip1559 = ` | maxFee: ${maxGwei.toFixed(2)} Gwei`;
+                    }
+                    if (feeData.maxPriorityFeePerGas) {
+                        const prioGwei = parseFloat(ethers.utils.formatUnits(feeData.maxPriorityFeePerGas, 'gwei'));
+                        eip1559 += ` | priority: ${prioGwei.toFixed(4)} Gwei`;
+                    }
+
+                    gasHelpText.innerHTML = `
+                        Standard: ${standard} Gwei (~${costStandard} ETH) &nbsp;|&nbsp;
+                        Fast: ${fast} Gwei (~${costFast} ETH) &nbsp;|&nbsp;
+                        Rapid: ${rapid} Gwei (~${costRapid} ETH)
+                        <br><span style="color:#888;font-size:12px">Auto-fetched via eth_gasPrice${eip1559}</span>
+                    `;
+
+                    const selected = gasStrategy.value;
+                    if (selected !== 'custom') {
+                        const p = window._gasPrices[selected];
+                        const cost = (300000 * p / 1e9).toFixed(6);
+                        gasDisplay.textContent = `${p} Gwei (≈ ${cost} ETH)`;
+                    }
+
+                    gasStrategy.disabled = false;
+                } catch (err) {
+                    gasDisplay.textContent = 'failed to fetch';
+                    gasHelpText.textContent = 'Could not fetch gas price. You can enter a manual value using "Custom".';
+                    console.error('Gas fetch error:', err);
+                }
+            }
+
             async function initProvider() {
                 if (typeof window.ethereum !== 'undefined') {
                     try {
@@ -306,6 +370,10 @@ input, select {
                         connectionStatus.className = 'success';
 
                         refundSection.classList.remove('hidden');
+
+                        gasDisplay.textContent = 'fetching...';
+                        await fetchAndDisplayGas();
+
                         setupEventListeners();
 
                         return true;
@@ -347,7 +415,20 @@ input, select {
                 return error.message || 'Unknown error';
             }
 
-            async function callRefundFunction(contractAddress, contractId, gasPriceGwei) {
+            function getSelectedGasGwei() {
+                const strategy = gasStrategy.value;
+                if (strategy === 'custom') {
+                    const val = gasCustom.value.trim();
+                    if (!val) return null;
+                    return parseFloat(val);
+                }
+                if (window._gasPrices && window._gasPrices[strategy] != null) {
+                    return window._gasPrices[strategy];
+                }
+                return null;
+            }
+
+            async function callRefundFunction(contractAddress, contractId) {
                 if (!signer) {
                     transactionStatus.textContent = 'Wallet not connected. Please connect to MetaMask first.';
                     transactionStatus.className = 'error';
@@ -378,9 +459,10 @@ input, select {
 
                     const contract = new ethers.Contract(contractAddress, contractABI, signer);
 
+                    const gasPriceGwei = getSelectedGasGwei();
                     const overrides = {};
-                    if (gasPriceGwei) {
-                        overrides.gasPrice = ethers.utils.parseUnits(gasPriceGwei, 'gwei');
+                    if (gasPriceGwei != null) {
+                        overrides.gasPrice = ethers.utils.parseUnits(String(gasPriceGwei), 'gwei');
                         overrides.gasLimit = ethers.BigNumber.from('300000');
                     }
 
@@ -390,13 +472,13 @@ input, select {
                     try {
                         tx = await contract.refund(formattedContractId, overrides);
                     } catch (innerError) {
-                        if (innerError.code === 'UNPREDICTABLE_GAS_LIMIT' && !gasPriceGwei) {
-                            const defaultGasPrice = '10';
-                            transactionStatus.textContent = `Gas estimation failed. Retrying with ${defaultGasPrice} Gwei gas price and 300,000 gas limit...`;
+                        if (innerError.code === 'UNPREDICTABLE_GAS_LIMIT' && gasPriceGwei == null) {
+                            const fallbackGwei = window._gasPrices ? window._gasPrices.standard : 10;
+                            transactionStatus.textContent = `Gas estimation failed. Retrying with ${fallbackGwei} Gwei gas price and 300,000 gas limit...`;
                             transactionStatus.className = 'pending';
 
                             const retryOverrides = {
-                                gasPrice: ethers.utils.parseUnits(defaultGasPrice, 'gwei'),
+                                gasPrice: ethers.utils.parseUnits(String(fallbackGwei), 'gwei'),
                                 gasLimit: ethers.BigNumber.from('300000')
                             };
                             tx = await contract.refund(formattedContractId, retryOverrides);
@@ -406,16 +488,15 @@ input, select {
                     }
 
                     let gasMsg = '';
-                    if (gasPriceGwei) {
-                        const estimatedCostWei = ethers.BigNumber.from('300000').mul(ethers.utils.parseUnits(gasPriceGwei, 'gwei'));
-                        const estimatedCostEth = ethers.utils.formatEther(estimatedCostWei);
-                        gasMsg = ` (300K gas \u00d7 ${gasPriceGwei} Gwei = ~${estimatedCostEth} ETH)`;
+                    const finalGwei = getSelectedGasGwei() || (window._gasPrices ? window._gasPrices.standard : null);
+                    if (finalGwei != null) {
+                        const estimatedCostEth = (300000 * finalGwei / 1e9).toFixed(6);
+                        gasMsg = ` (300K gas \u00d7 ${finalGwei} Gwei = ~${estimatedCostEth} ETH)`;
                     }
                     transactionStatus.textContent = `Transaction submitted${gasMsg}! Hash: ${tx.hash}`;
 
                     await tx.wait();
 
-                    const currentGasPrice = gasPriceGwei || 'estimated';
                     transactionStatus.textContent = `Transaction confirmed! Hash: ${tx.hash}`;
                     transactionStatus.className = 'success';
 
@@ -448,6 +529,20 @@ input, select {
                 }
             }
 
+            gasStrategy.addEventListener('change', () => {
+                const showCustom = gasStrategy.value === 'custom';
+                gasCustomGroup.classList.toggle('hidden', !showCustom);
+                if (!showCustom && window._gasPrices) {
+                    const p = window._gasPrices[gasStrategy.value];
+                    const cost = (300000 * p / 1e9).toFixed(6);
+                    gasDisplay.textContent = `${p} Gwei (≈ ${cost} ETH)`;
+                } else if (!showCustom) {
+                    gasDisplay.textContent = 'fetching...';
+                } else {
+                    gasDisplay.textContent = 'enter manually below';
+                }
+            });
+
             connectButton.addEventListener('click', async () => {
                 connectButton.disabled = true;
                 const success = await initProvider();
@@ -459,7 +554,6 @@ input, select {
             refundButton.addEventListener('click', async () => {
                 const contractAddress = contractAddressInput.value;
                 const contractId = refundParam.value;
-                const gasPrice = gasPriceInput.value.trim();
 
                 if (contractAddress.trim() === '') {
                     transactionStatus.textContent = 'Please enter a contract address.';
@@ -473,8 +567,14 @@ input, select {
                     return;
                 }
 
+                if (gasStrategy.value === 'custom' && gasCustom.value.trim() === '') {
+                    transactionStatus.textContent = 'Please enter a custom gas price in Gwei or switch to Standard/Fast/Rapid.';
+                    transactionStatus.className = 'error';
+                    return;
+                }
+
                 refundButton.disabled = true;
-                await callRefundFunction(contractAddress, contractId, gasPrice || null);
+                await callRefundFunction(contractAddress, contractId);
                 refundButton.disabled = false;
             });
         });
