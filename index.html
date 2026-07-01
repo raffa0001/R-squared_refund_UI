@@ -201,12 +201,6 @@ input, select {
                     <p class="help-text">Gas price in Gwei (1 Gwei = 0.000000001 ETH). If estimation fails, this price is used with a 300,000 gas limit.</p>
                 </div>
 
-                <div class="input-group">
-                    <label for="tx-value">Value to send (ETH) — optional, most refunds don't need this:</label>
-                    <input type="text" id="tx-value" placeholder="e.g. 0.01">
-                    <p class="help-text">Only fill this in if the refund contract requires sending ETH. Most refund functions are nonpayable.</p>
-                </div>
-
                 <button id="refund-button">Execute Refund</button>
                 <div id="transaction-status"></div>
             </div>
@@ -225,7 +219,6 @@ input, select {
             const contractAddressInput = document.getElementById('contract-address');
             const refundParam = document.getElementById('refund-param');
             const gasPriceInput = document.getElementById('gas-price');
-            const txValueInput = document.getElementById('tx-value');
             const refundButton = document.getElementById('refund-button');
             const transactionStatus = document.getElementById('transaction-status');
 
@@ -354,7 +347,7 @@ input, select {
                 return error.message || 'Unknown error';
             }
 
-            async function callRefundFunction(contractAddress, contractId, gasPriceGwei, valueEth) {
+            async function callRefundFunction(contractAddress, contractId, gasPriceGwei) {
                 if (!signer) {
                     transactionStatus.textContent = 'Wallet not connected. Please connect to MetaMask first.';
                     transactionStatus.className = 'error';
@@ -390,9 +383,6 @@ input, select {
                         overrides.gasPrice = ethers.utils.parseUnits(gasPriceGwei, 'gwei');
                         overrides.gasLimit = ethers.BigNumber.from('300000');
                     }
-                    if (valueEth) {
-                        overrides.value = ethers.utils.parseEther(valueEth);
-                    }
 
                     transactionStatus.textContent = 'Sending transaction...';
 
@@ -409,9 +399,6 @@ input, select {
                                 gasPrice: ethers.utils.parseUnits(defaultGasPrice, 'gwei'),
                                 gasLimit: ethers.BigNumber.from('300000')
                             };
-                            if (valueEth) {
-                                retryOverrides.value = ethers.utils.parseEther(valueEth);
-                            }
                             tx = await contract.refund(formattedContractId, retryOverrides);
                         } else {
                             throw innerError;
@@ -473,7 +460,6 @@ input, select {
                 const contractAddress = contractAddressInput.value;
                 const contractId = refundParam.value;
                 const gasPrice = gasPriceInput.value.trim();
-                const valueEth = txValueInput.value.trim();
 
                 if (contractAddress.trim() === '') {
                     transactionStatus.textContent = 'Please enter a contract address.';
@@ -488,7 +474,7 @@ input, select {
                 }
 
                 refundButton.disabled = true;
-                await callRefundFunction(contractAddress, contractId, gasPrice || null, valueEth || null);
+                await callRefundFunction(contractAddress, contractId, gasPrice || null);
                 refundButton.disabled = false;
             });
         });
